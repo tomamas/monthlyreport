@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Restaurant Monthly Report Generator</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.17.0/xlsx.full.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 20px;
+            background-color: #f4f4f4;
+        }
+        .container {
+            max-width: 800px;
+            margin: auto;
+            background: white;
+            padding: 20px;
+            border-radius: 5px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        h1, h2 {
+            color: #333;
+        }
+        #fileInput {
+            margin-bottom: 20px;
+        }
+        #uploadStatus, #report {
+            white-space: pre-wrap;
+            background-color: #eee;
+            padding: 15px;
+            border-radius: 5px;
+            margin-top: 20px;
+        }
+        button {
+            background-color: #4CAF50;
+            border: none;
+            color: white;
+            padding: 15px 32px;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 16px;
+            margin: 4px 2px;
+            cursor: pointer;
+        }
+        #downloadExcel {
+            background-color: #008CBA;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Restaurant Monthly Report Generator</h1>
+        <input type="file" id="fileInput" accept=".csv" multiple>
+        <div id="uploadStatus"></div>
+        <button id="generateReport" style="display: none;">Generate Report</button>
+        <button id="downloadExcel" style="display: none;">Download Advanced Excel Report</button>
+        <div id="report"></div>
+    </div>
+
+    <script>
+        let allData = [];
+        let reportData = {};
+        const fileInput = document.getElementById('fileInput');
+        const uploadStatus = document.getElementById('uploadStatus');
+        const generateReportButton = document.getElementById('generateReport');
+        const downloadExcelButton = document.getElementById('downloadExcel');
+        const reportDiv = document.getElementById('report');
+
+        fileInput.addEventListener('change', handleFileSelect);
+        generateReportButton.addEventListener('click', generateReport);
+        downloadExcelButton.addEventListener('click', downloadExcel);
+
+        function handleFileSelect(event) {
+            const files = event.target.files;
+            allData = [];
+            uploadStatus.textContent = '';
+            
+            let filesProcessed = 0;
+            
+            for (let i = 0; i < files.length; i++) {
+                Papa.parse(files[i], {
+                    complete: function(results) {
+                        allData.push(...results.data.slice(1));  // Remove header row
+                        filesProcessed++;
+                        uploadStatus.textContent += `Processed ${files[i].name}\n`;
+                        
+                        if (filesProcessed === files.length) {
+                            generateReportButton.style.display = 'block';
+                            uploadStatus.textContent += 'All files processed. Click "Generate Report" to continue.';
+                        }
+                    }
+                });
+            }
+        }
+
+        function generateReport() {
+            // Initialize variables
+            let dailyProfits = {};
+            let categorySums = {
+                'Cash Sales': 0,
+                'Credit Card Sales': 0,
+                'Bank Transfer Sales': 0,
+                'Food': 0,
+                'Flour': 0,
+                'Chicken': 0,
+                'Gas': 0,
+                'Electric': 0,
+                'Salaries': 0,
+                'Rental Tax': 0,
+                'Maintenance': 0
+            };
+            let monthlyProfit = 0;
+            let branchData = {};
+
+            // Process data
+            allData.forEach(row => {
+                if (row.length < 13) return; // Skip invalid rows
+
+                const date = row[0];
+                const branch = row[1];
+                const income = safeParseFloat(row[2]) + safeParseFloat(row[3]) + safeParseFloat(row[4]);
+                const expenses = safeParseFloat(row[5]) + safeParseFloat(row[6]) + safeParseFloat(row[7]) + 
+                                 safeParseFloat(row[8]) + safeParseFloat(row[9]) + safeParseFloat(row[10]) + 
+                                 safeParseFloat(row[11]) + safeParseFloat(row[12]);
+                const profit = income - expenses;
+
+                // Daily profit
+                if (date in dailyProfits) {
+                    dailyProfits[date] += profit;
+                } else {
+                    dailyProfits[date] = profit;
+                }
+
+                // Category sums
+                for (let i = 2; i <= 12; i++) {
+                    categorySums[Object.keys(categorySums)[i-2]] += safeParseFloat(row[i]);
+                }
+
+                // Monthly profit
+                monthlyProfit += profit;
+
+                // Branch data
+                if (!(branch in branchData)) {
+                    branchData[branch] = { totalSales: 0, totalExpenses: 0, profit: 0 };
+                }
+                branchData[branch].totalSales += income;
+                branchData[branch].totalExpenses += expenses;
+                branchData[branch].profit += profit;
+            });
+
+            // Generate report
+            let report = "Monthly Report\n\n";
+
+            report += "Daily Profits:\n";
+            for (let date in dailyProfits) {
+                report += `${date}: $${dailyProfits[date].toFixed(2)}\n`;
+            }
+
+            report += "\nCategory Sums:\n";
+            for (let category in categorySums) {
+                report += `${category}: $${categorySums[category].toFixed(2)}\n`;
+            }
+
+            report += `\nMonthly Profit: $${monthlyProfit.toFixed(2)}`;
+
+            // Display report
+            reportDiv.textContent = report;
+
+            // Store report data for Excel download
+            reportData = { dailyProfits, categorySums, monthlyProfit, branchData };
+
+            // Show download button
+            downloadExcelButton.style.display = 'block';
+        }
+
+        function safeParseFloat(value) {
+            const parsed = parseFloat(value);
+            return isNaN(parsed) ? 0 : parsed;
+        }
+
+        function downloadExcel() {
+            // Create workbook
+            const wb = XLSX.utils.book_new();
+
+            // Summary sheet
+            const summaryData = [
+                ['Monthly Summary'],
+                ['Total Revenue', `$${(reportData.categorySums['Cash Sales'] + reportData.categorySums['Credit Card Sales'] + reportData.categorySums['Bank Transfer Sales']).toFixed(2)}`],
+                ['Total Expenses', `$${(reportData.categorySums['Food'] + reportData.categorySums['Flour'] + reportData.categorySums['Chicken'] + reportData.categorySums['Gas'] + reportData.categorySums['Electric'] + reportData.categorySums['Salaries'] + reportData.categorySums['Rental Tax'] + reportData.categorySums['Maintenance']).toFixed(2)}`],
+                ['Monthly Profit', `$${reportData.monthlyProfit.toFixed(2)}`],
+                [],
+                ['Category', 'Amount', 'Percentage of Total'],
+                ...Object.entries(reportData.categorySums).map(([category, amount]) => [
+                    category,
+                    `$${amount.toFixed(2)}`,
+                    `${((amount / (reportData.categorySums['Cash Sales'] + reportData.categorySums['Credit Card Sales'] + reportData.categorySums['Bank Transfer Sales'])) * 100).toFixed(2)}%`
+                ])
+            ];
+            const summarySheet = XLSX.utils.aoa_to_sheet(summaryData);
+            XLSX.utils.book_append_sheet(wb, summarySheet, 'Summary');
+
+            // Daily Profits sheet
+            const dailyProfitsData = [
+                ['Date', 'Profit'],
+                ...Object.entries(reportData.dailyProfits).map(([date, profit]) => [date, profit])
+            ];
+            const dailyProfitsSheet = XLSX.utils.aoa_to_sheet(dailyProfitsData);
+            XLSX.utils.book_append_sheet(wb, dailyProfitsSheet, 'Daily Profits');
+
+            // Branch Performance sheet
+            const branchPerformanceData = [
+                ['Branch', 'Total Sales', 'Total Expenses', 'Profit', 'Profit Margin'],
+                ...Object.entries(reportData.branchData).map(([branch, data]) => [
+                    branch,
+                    `$${data.totalSales.toFixed(2)}`,
+                    `$${data.totalExpenses.toFixed(2)}`,
+                    `$${data.profit.toFixed(2)}`,
+                    `${((data.profit / data.totalSales) * 100).toFixed(2)}%`
+                ])
+            ];
+            const branchPerformanceSheet = XLSX.utils.aoa_to_sheet(branchPerformanceData);
+            XLSX.utils.book_append_sheet(wb, branchPerformanceSheet, 'Branch Performance');
+
+            // Apply some styling
+            ['Summary', 'Daily Profits', 'Branch Performance'].forEach(sheetName => {
+                const sheet = wb.Sheets[sheetName];
+                const range = XLSX.utils.decode_range(sheet['!ref']);
+                for (let R = range.s.r; R <= range.e.r; ++R) {
+                    for (let C = range.s.c; C <= range.e.c; ++C) {
+                        const cell_address = {c:C, r:R};
+                        const cell_ref = XLSX.utils.encode_cell(cell_address);
+                        if(!sheet[cell_ref]) continue;
+                        sheet[cell_ref].s = {
+                            font: {name: "Arial", sz: 11},
+                            alignment: {vertical: "center", horizontal: "center"},
+                            border: {
+                                top: {style: "thin"},
+                                bottom: {style: "thin"},
+                                left: {style: "thin"},
+                                right: {style: "thin"}
+                            }
+                        };
+                        if(R === 0 || C === 0) {
+                            sheet[cell_ref].s.font.bold = true;
+                            sheet[cell_ref].s.fill = {fgColor: {rgb: "CCCCCC"}};
+                        }
+                    }
+                }
+            });
+
+            // Generate Excel file
+            XLSX.writeFile(wb, 'Advanced_Restaurant_Monthly_Report.xlsx');
+        }
+    </script>
+</body>
+</html>
